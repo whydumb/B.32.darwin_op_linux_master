@@ -1,0 +1,137 @@
+----- Project goals -----
+
+- Create a simulation of the DARwIn-OP robot on the Webots simulator as realisitc as possible.
+- Allow to run a controller written using exclusively the Webots API (and not the Robotis API) in simulation and in reality
+
+
+
+----- Project structure -----
+
+The root of the project should match with the root of Webots.
+At each new Webots release, this project can be merged in the root directory of Webots.
+
+
+
+----- Installation (beta) -----
+
+A. Get the git repository
+
+- 1. Let say its git repository path is called $GIT_REPOSITORY
+
+
+B. Install Webots
+
+- 1. Follow the instructions of the user manual of Webots to install Webots
+
+- 2. Let say its installation path is called $WEBOTS_HOME
+
+
+C. Install default software on the DARwIn-OP
+
+- 1. Let say the root path of the DARwIn-OP is called $DARWINOP
+
+
+D. Run the simulation
+
+- 1. Merge the "resources" directory git repository with the "resources" directory of Webots
+     $ cp -R $GIT_REPOSITORY/resources $WEBOTS_HOME
+
+- 2. Compile the darwin and manager libraries by typing:
+     $ cd $WEBOTS_HOME/resources/projects/robots/darwin-op/libraries/darwin
+     $ make
+     => $WEBOTS_HOME/resources/projects/robots/darwin-op/libraries/darwin/libdarwin is generated
+     $ cd $WEBOTS_HOME/resources/projects/robots/darwin-op/libraries/managers
+     $ make
+     => $WEBOTS_HOME/resources/projects/robots/darwin-op/libraries/managers/libmanagers is generated
+
+- 3. Compile a Soccer controller
+     Open Webots and compile the controller:
+     $ webots $GIT_REPOSITORY/projects/robots/darwin-op/worlds/soccer.wbt
+     From the Webots GUI, open $GIT_REPOSITORY/projects/robots/darwin-op/controllers/soccer/Soccer.cpp and
+     hit the "Build / Build" menu item.
+     Revert and play the simulation.
+
+
+E. Run the same controller on the DARwIn-OP
+
+- 1. Make sure you have version 1.5.0 of DARwIn-OP's Framework installed on the robot.
+     The version of the Framework can be checked in /darwin/ReleaseNote.txt
+     If version 1.5.0 is not installed you can found it here : http://sourceforge.net/projects/darwinop/files/Software/Main%20Controller/Source%20Code/
+     You simply have to merge /darwin with the files present in DARwIn-OP_ROBOTIS_v1.5.0.zip
+
+- 2. On the DARwIn-OP, merge $GIT_REPOSITORY/resources/projects/robots/darwin-op/libraries/darwin/darwin/ with existing DARwIn-OP source code in /darwin/ directory
+
+     $ cp -R $GIT_REPOSITORY/resources/projects/robots/darwin-op/libraries/darwin/darwin/* /darwin/ 
+
+- 3. On the DARwIn-OP, recompile the Framework
+
+     $ cd /darwin/Linux/build
+     $ make clean
+     $ make
+	 
+     $ cd /darwin/Linux/project/demo
+     $ make distclean
+     $ make
+	 
+     $ chown darwin.darwin /darwin
+	 
+- 4. On the DARwIn-OP, create a /darwin/Linux/project/webots directory
+
+- 5. Copy-paste the "libraries/managers/include", "libraries/managers/lib", "transfer", and "libraries/managers/src" directories of the $GIT_REPOSITORY/resources/projects/robots/darwin-op
+     directory directly in the /darwin/Linux/project/webots directory
+
+- 6. Do the same with the $GIT_REPOSITORY/projects/robots/darwin-op/controllers directory.
+     Note: From now, on the real DARwIn-OP, you should have these directories:
+       /darwin/Linux/project/webots/include
+       /darwin/Linux/project/webots/lib
+       /darwin/Linux/project/webots/transfer
+       /darwin/Linux/project/webots/src
+       /darwin/Linux/project/webots/controllers
+
+- 7. Compile the wrapper library
+     $ cd /darwin/Linux/project/webots/transfer/lib
+     $ make
+
+- 8. Compile the managers library
+     $ cd /darwin/Linux/project/webots/lib
+     $ make -f Makefile.darwin-op
+
+- 9. Compile the controller
+     $ cd /darwin/Linux/project/webots/controllers/symmetry
+     $ make -f Makefile.darwin-op
+
+-10. Start the controller
+     $ ./symmetry
+     To stop the controller press Ctrl+c
+     You can now try the other examples presents in the directory "controllers"
+
+F. Run your controller on the robot from Webots (remote-control)
+
+- 1. On the DARwIn-OP, copy paste $GIT_REPOSITORY/resources/projects/robots/darwin-op/remote_control directory in /darwin/Linux/project/webots
+
+- 2. Compile remote control serveur on the DARwIn-OP
+     $ cd /darwin/Linux/project/webots/remote_control
+     $ make -f Makefile.darwin-op
+
+- 3. Start the remote serveur
+     $ /darwin/Linux/project/webots/remote_control/remote_control 1 1 (adjust parameters if camera resolution is not 320x240, example 2 1 for a resolution of 160x240)
+
+- 4. Set the robot in remote-control mode on Webots by adding the following lines in the controller
+     const char arguments[16] = "192.168.123.1";  // adjust IP adress if the robot is connected by wifi
+     setMode(MODE_REMOTE_CONTROL, (void *)arguments);
+
+- 5. Compile controller and revert world
+
+----- Known issues ----- 
+
+- 1. In simulation, in the DARwInOPGaitManager, the lateral balance do not work as expected.
+     It is recommended to set balance_hip_roll_gain and balance_ankle_roll_gain to 0.0,
+     this must be done in the file 'config.ini' attached to the controller.
+- 2. In simulation the P gain of the servo affects the speed but on the real robot it affects
+     the torque. This can cause differences between simulation and reality in some specific cases.
+     Especially when P is small.
+
+----- Contributors -----
+
+Robotis, Cyberbotics, and users ^^
+

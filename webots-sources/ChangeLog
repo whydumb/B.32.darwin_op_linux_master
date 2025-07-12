@@ -1,0 +1,146 @@
+Webots 7.1.X
+
+Released ...
+
+  Simulation :
+
+  Cross-Compilation:
+    Corrected problem of controllers compilation errors if the time of the robot and of the computer are not synchronized.
+
+  Remote-control:
+
+
+Webots 7.1.2
+
+Released on March 11th, 2013 (revision 13812) 
+
+  Added the possibility to use MotionManager step-by-step (both for simulation and cross-compilation)
+
+  Cross-Compilation:
+    Minors debug when cross-compiling from the robot window on Windows (checkbox 'make default controller' now toogle correctly, message windows are not hidden behind the robot window anymore)
+
+  Remote-control:
+    Fixed problem of crash of the remote-server when sending command to servos who doesn't exist
+    Fixed problem of crash of the robot window when aborting start of remote-control   
+    Fixed problem of led switching off when stopping the controller
+    
+
+Webots 7.1.1
+
+Released on March 7th, 2013 (revision 13751) 
+
+  Added remote-control
+  Added custom robot-window which allows to install Webots API on the robot, start remote-control and cross-compile easily
+
+  Simulation :
+
+    Corrected wrong link between the LEDS: BackLedRed, BackLedGreen and BackLedBlue
+    Set default basicTimeStep to 16ms for each example
+    Increase camera refresh time to 32ms in example 'Soccer' and 'Visual_tracking'
+    Manager static library split into two dynamics libraries, now located in /libraries/darwin and /libraries/managers instead of /lib
+
+  Cross-Compilation:
+    
+    Added text-to-speech functions in Speaker module
+
+Webots 7.1.0
+
+Released on January 18th, 2013 (revision 13099) 
+
+  Simulation :
+
+    Added Vision Manager in order to use the main image processing tools of the Framework in simulation
+    Added example Visual Tracking
+    Updated example Sample to use Manager Vision
+    Corrected wrong link between Head and Eye LED
+    Added the two backLED representations of Head and Eye LED (these backLED are not controllable)
+    Replaced motion 57 by motion 24 in the example 'sample' at the beginning
+    Improved Gait manager to wait the end of the step before to stop walking
+    Modified example Sample to be compatible with cross-compilation
+    Renamed example 'Sample' in example 'Soccer'.
+    Added showRobotWindow field
+    Added example Walk
+
+
+  Cross-Compilation:
+    
+    Vision Manager is also available on the real robot
+    Improved start of the controller, servo movements smoother at startup
+    Added LED indications (red : robot is initializing / green : robot is ready, controller will start)
+    Added keyboard functions (a small window appears now on the real robot to catch keyboard inputs when enabling it)
+
+
+Webots 7.0.3
+
+Released on December 6th, 2012 (revision 12573) 
+
+  Simulation :
+
+    Corrected center of mass of LegLowerL and LegLowerR (thanks to Chase)
+    Added field staticFriction and adapted field dampingConstant for each servos
+    Added a warning if the MotionManager is used without having enabled all the servos position and auto enable them
+
+  Cross-Compilation:
+    
+    Fixed inversion of sign of the value returned by Servo::getMotorForceFeedback
+    Fixed the direction of the force applied by Servo::setForce which was wrong for some servos
+
+
+Webots 7.0.2
+
+Released on November 16th, 2012 (revision 12294) 
+
+  Simulation :
+
+    Added a new example, called symmetry
+    Modified gait section in the 'config.ini' file
+    Modified gait manager in order to be closer from the one from the real robot
+    Changed initial position of all servos in order to be like for the real robot, now the initial position is sit down
+    Added a small damping to each servos in the proto
+    Changed most of the BoundingBoxes
+    Added the possibility to enable the self collision check
+    Added description in the example 'sample' and 'symmetry'
+    Added balance to the gait manager
+    Added acceleration and maxVelocity field for each servo
+    Corrected Accelerometer orientation (inversion of axes X and Z)
+
+  Cross-Compilation:
+    
+    Changed the reading of the servos states, everything is now done in robot::step in one packet (by using BulkRead function of the CM730), gain of time
+    Changed the writing of the servos settings, everything is now done in robot::step in one packet (by using SyncWrite function of the CM730), gain of time
+    Added the possibility to set the time step in the 'config.ini' file
+    Modified gait manager in order to be independant from the time step
+    Suppressed the readTable function to read the sensors value, and read of the sensors value thanks to the BulkRead
+    Added the possibility to set height and with of the camera in the 'config.ini' file
+    
+
+Webots 7.0.1
+
+Released on October 26th, 2012 (revision 11978)
+
+  Simulation :
+
+    Added Three BackLeds in the proto
+    Added minPosition & maxPosition for each servos in the proto
+    Revised maxForce for each servos in the proto
+    Added the inertiaMatrix to all physics nodes in the proto
+    Revised some centerOfMass in the proto
+    Fixed bug with the mottion manager in simulation, it is now possible to play motions that are stored in more than one page
+
+  Cross-Compilation:
+
+    Revised accelerometer and gyro reading
+    Fixed namespace issue in the module camera
+    Fixed inversion of color for the rgb led
+    Added a speacker module
+    Added setMotorForce & getPosition in the servos module
+    Fixed inversion of motion file in the motion manager
+    Added setVelocity, setForce, setAcceleration, setControlP & getMotorForceFeedback in servos module
+    Fixed wrong initialization of the linuxMotionTimer
+    Changed enabling and disabling of the joint in the gait and motion manager
+    Modified getWidth() & getHeight() in the module camera in order to change dynamically the value
+    Added a minimalist self collision avoidance in setPosition of the servos module
+    Modified timming management in robot step
+    Changed the reading of the sensors value, everything is read in one packet (by using ReadTable function of the CM730) in the robot::step, gain of time.
+
+Webots 6.4.5
