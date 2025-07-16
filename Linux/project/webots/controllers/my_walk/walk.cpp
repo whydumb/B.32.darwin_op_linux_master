@@ -1,4 +1,3 @@
-// 기존 walk.cpp 구조를 유지하면서 DARwIn-OP 기능 추가
 #include <stdio.h>
 #include <string.h>
 #include <pthread.h>
@@ -7,105 +6,55 @@
 #include <unistd.h>
 #include <stdlib.h>
 
-// DARwIn-OP 관련 헤더 (실제 로봇용)
-#ifdef REAL_ROBOT
-#include "LinuxDARwIn.h"
-#include "Action.h"
-#include "Walking.h"
-#include "MotionManager.h"
-#include "LinuxMotionTimer.h"
-#include "MotionStatus.h"
-#include "JointData.h"
-#include "MX28.h"
-#endif
+#include "Walk.hpp"
+#include <webots/LED.hpp>
+#include <webots/Accelerometer.hpp>
+#include <webots/Gyro.hpp>
+#include <webots/Motor.hpp>
+#include <DARwInOPMotionManager.hpp>
+#include <DARwInOPGaitManager.hpp>
 
-// 로봇 상태 구조체
-struct RobotState {
-    int gain;
-    bool isWalking;
-    double xAmplitude;
-    double yAmplitude;
-    double aAmplitude;
-    bool isInitialized;
-    
-    RobotState() : gain(128), isWalking(false), xAmplitude(0.0), 
-                   yAmplitude(0.0), aAmplitude(0.0), isInitialized(false) {}
-};
+#include <cstdlib>
+#include <cmath>
+#include <iostream>
+#include <fstream>
 
-RobotState robotState;
+using namespace webots;
+using namespace managers;
+using namespace std;
+
+// 로봇 상태 전역변수
+int gain = 128;
+bool isWalking = false;
+double xAmplitude = 0.0;
+double yAmplitude = 0.0;
+double aAmplitude = 0.0;
 pthread_mutex_t stateMutex = PTHREAD_MUTEX_INITIALIZER;
 
-#ifdef REAL_ROBOT
-// 실제 로봇 제어용 전역 변수
-Robot::LinuxCM730* linux_cm730 = nullptr;
-Robot::CM730* cm730 = nullptr;
-Robot::LinuxMotionTimer* motion_timer = nullptr;
-#endif
+static const char *motorNames[NMOTORS] = {
+  "ShoulderR", "ShoulderL", "ArmUpperR", "ArmUpperL",
+  "ArmLowerR", "ArmLowerL", "PelvYR", "PelvYL",
+  "PelvR", "PelvL", "LegUpperR", "LegUpperL",
+  "LegLowerR", "LegLowerL", "AnkleR", "AnkleL",
+  "FootR", "FootL", "Neck", "Head"
+};
 
-// HTML 파일 로드 (기존과 동일)
 char* load_html() {
     FILE* f = fopen("walk.html", "r");
     if (!f) {
-        // 기존 walk.html 구조 + 추가 기능
         static char html[] = 
-            "<!DOCTYPE html>\n"
-            "<html>\n"
-            "<head>\n"
-            "    <title>Robot Control</title>\n"
-            "    <style>\n"
-            "        body { font-family: Arial; margin: 20px; }\n"
-            "        button { padding: 10px 20px; margin: 5px; font-size: 16px; }\n"
-            "        .gain-btn { background-color: #28a745; color: white; border: none; }\n"
-            "        .walk-btn { background-color: #007bff; color: white; border: none; }\n"
-            "        .status { margin: 20px 0; padding: 10px; background-color: #f8f9fa; }\n"
-            "    </style>\n"
-            "</head>\n"
-            "<body>\n"
-            "    <h1>Robot Control</h1>\n"
-            "    \n"
-            "    <!-- 기존 gain 제어 (원래 walk.html과 동일) -->\n"
-            "    <button class=\"gain-btn\" onclick=\"fetch('/?gain_plus')\">Gain +</button>\n"
-            "    <button class=\"gain-btn\" onclick=\"fetch('/?gain_minus')\">Gain -</button>\n"
-            "    \n"
-            "    <br><br>\n"
-            "    \n"
-            "    <!-- 추가 로봇 제어 기능 -->\n"
-            "    <h2>Walking Control</h2>\n"
-            "    <button class=\"walk-btn\" onclick=\"fetch('/?walk_start')\">Start Walking</button>\n"
-            "    <button class=\"walk-btn\" onclick=\"fetch('/?walk_stop')\">Stop Walking</button>\n"
-            "    \n"
-            "    <br><br>\n"
-            "    \n"
-            "    <h2>Movement</h2>\n"
-            "    <button onclick=\"fetch('/?move_forward')\">Forward</button>\n"
-            "    <button onclick=\"fetch('/?move_backward')\">Backward</button>\n"
-            "    <br>\n"
-            "    <button onclick=\"fetch('/?turn_left')\">Turn Left</button>\n"
-            "    <button onclick=\"fetch('/?turn_right')\">Turn Right</button>\n"
-            "    \n"
-            "    <div class=\"status\">\n"
-            "        <p>Current Gain: <span id=\"gain\">128</span></p>\n"
-            "        <p>Walking: <span id=\"walking\">Stopped</span></p>\n"
-            "    </div>\n"
-            "    \n"
-            "    <script>\n"
-            "        // 상태 업데이트\n"
-            "        setInterval(function() {\n"
-            "            fetch('/?get_status')\n"
-            "                .then(response => response.text())\n"
-            "                .then(data => {\n"
-            "                    try {\n"
-            "                        const status = JSON.parse(data);\n"
-            "                        document.getElementById('gain').textContent = status.gain;\n"
-            "                        document.getElementById('walking').textContent = status.walking ? 'Walking' : 'Stopped';\n"
-            "                    } catch(e) {\n"
-            "                        document.getElementById('gain').textContent = data;\n"
-            "                    }\n"
-            "                });\n"
-            "        }, 1000);\n"
-            "    </script>\n"
-            "</body>\n"
-            "</html>";
+            "HTTP/1.1 200 OK\r\n\r\n"
+            "<html><body>"
+            "<h1>Robot Control</h1>"
+            "<button onclick=\"fetch('/?gain_plus')\">Gain +</button>"
+            "<button onclick=\"fetch('/?gain_minus')\">Gain -</button><br><br>"
+            "<button onclick=\"fetch('/?walk_start')\">Start Walking</button>"
+            "<button onclick=\"fetch('/?walk_stop')\">Stop Walking</button><br><br>"
+            "<button onclick=\"fetch('/?move_forward')\">Forward</button>"
+            "<button onclick=\"fetch('/?move_backward')\">Backward</button><br>"
+            "<button onclick=\"fetch('/?turn_left')\">Turn Left</button>"
+            "<button onclick=\"fetch('/?turn_right')\">Turn Right</button>"
+            "</body></html>";
         return strdup(html);
     }
     
@@ -119,144 +68,7 @@ char* load_html() {
     return html;
 }
 
-// 로봇 초기화 함수
-bool initializeRobot() {
-#ifdef REAL_ROBOT
-    printf("Initializing DARwIn-OP robot...\n");
-    
-    // CM730 초기화
-    linux_cm730 = new Robot::LinuxCM730("/dev/ttyUSB0");
-    cm730 = new Robot::CM730(linux_cm730);
-    
-    if (cm730->Connect() == false) {
-        printf("Failed to connect to CM730\n");
-        return false;
-    }
-    
-    // MotionManager 초기화
-    if (Robot::MotionManager::GetInstance()->Initialize(cm730) == false) {
-        printf("Failed to initialize MotionManager\n");
-        return false;
-    }
-    
-    // 모션 타이머 시작
-    motion_timer = new Robot::LinuxMotionTimer(Robot::MotionManager::GetInstance());
-    motion_timer->Start();
-    
-    // Walking 모듈 추가
-    Robot::MotionManager::GetInstance()->AddModule((Robot::MotionModule*)Robot::Walking::GetInstance());
-    Robot::MotionManager::GetInstance()->AddModule((Robot::MotionModule*)Robot::Action::GetInstance());
-    
-    // LED를 초록색으로 설정 (초기화 완료)
-    cm730->WriteWord(Robot::CM730::ID_CM, Robot::CM730::P_LED_HEAD_L, 1984, 0);
-    
-    printf("Robot initialized successfully!\n");
-    return true;
-#else
-    printf("Robot simulation mode - no real robot connected\n");
-    return true;
-#endif
-}
-
-// 로봇 제어 함수
-void controlRobot() {
-#ifdef REAL_ROBOT
-    if (!robotState.isInitialized) return;
-    
-    pthread_mutex_lock(&stateMutex);
-    
-    if (robotState.isWalking) {
-        // 걷기 시작
-        if (!Robot::Walking::GetInstance()->IsRunning()) {
-            Robot::Walking::GetInstance()->Start();
-        }
-        
-        // 걷기 파라미터 설정
-        Robot::Walking::GetInstance()->X_MOVE_AMPLITUDE = robotState.xAmplitude * 20.0;
-        Robot::Walking::GetInstance()->Y_MOVE_AMPLITUDE = robotState.yAmplitude * 20.0;
-        Robot::Walking::GetInstance()->A_MOVE_AMPLITUDE = robotState.aAmplitude * 30.0;
-    } else {
-        // 걷기 중지
-        if (Robot::Walking::GetInstance()->IsRunning()) {
-            Robot::Walking::GetInstance()->Stop();
-            // 걷기 파라미터 리셋
-            Robot::Walking::GetInstance()->X_MOVE_AMPLITUDE = 0;
-            Robot::Walking::GetInstance()->Y_MOVE_AMPLITUDE = 0;
-            Robot::Walking::GetInstance()->A_MOVE_AMPLITUDE = 0;
-        }
-    }
-    
-    pthread_mutex_unlock(&stateMutex);
-#endif
-}
-
-// 명령어 처리 (기존 방식 유지)
-void processCommand(const char* url, char* response) {
-    pthread_mutex_lock(&stateMutex);
-    
-    printf("Processing command: %s\n", url);
-    
-    if (strstr(url, "gain_plus")) {
-        robotState.gain += 10;
-        if (robotState.gain > 255) robotState.gain = 255;
-        sprintf(response, "%d", robotState.gain);
-        printf("Gain increased to: %d\n", robotState.gain);
-    }
-    else if (strstr(url, "gain_minus")) {
-        robotState.gain -= 10;
-        if (robotState.gain < 0) robotState.gain = 0;
-        sprintf(response, "%d", robotState.gain);
-        printf("Gain decreased to: %d\n", robotState.gain);
-    }
-    else if (strstr(url, "walk_start")) {
-        robotState.isWalking = true;
-        strcpy(response, "Walking started");
-        printf("Walking started\n");
-    }
-    else if (strstr(url, "walk_stop")) {
-        robotState.isWalking = false;
-        robotState.xAmplitude = 0.0;
-        robotState.yAmplitude = 0.0;
-        robotState.aAmplitude = 0.0;
-        strcpy(response, "Walking stopped");
-        printf("Walking stopped\n");
-    }
-    else if (strstr(url, "move_forward")) {
-        robotState.xAmplitude = 1.0;
-        strcpy(response, "Moving forward");
-        printf("Moving forward\n");
-    }
-    else if (strstr(url, "move_backward")) {
-        robotState.xAmplitude = -1.0;
-        strcpy(response, "Moving backward");
-        printf("Moving backward\n");
-    }
-    else if (strstr(url, "turn_left")) {
-        robotState.aAmplitude = 0.5;
-        strcpy(response, "Turning left");
-        printf("Turning left\n");
-    }
-    else if (strstr(url, "turn_right")) {
-        robotState.aAmplitude = -0.5;
-        strcpy(response, "Turning right");
-        printf("Turning right\n");
-    }
-    else if (strstr(url, "get_status")) {
-        // JSON 형태로 상태 반환
-        sprintf(response, "{\"gain\":%d,\"walking\":%s}", 
-                robotState.gain, 
-                robotState.isWalking ? "true" : "false");
-    }
-    else {
-        strcpy(response, "Unknown command");
-        printf("Unknown command: %s\n", url);
-    }
-    
-    pthread_mutex_unlock(&stateMutex);
-}
-
-// 웹 서버 (기존 구조 유지)
-void* server(void* arg) {
+void* server(void*) {
     int s = socket(AF_INET, SOCK_STREAM, 0);
     struct sockaddr_in addr = {AF_INET, htons(8080), {INADDR_ANY}};
     int opt = 1;
@@ -269,72 +81,159 @@ void* server(void* arg) {
     while (1) {
         int client = accept(s, NULL, NULL);
         char buf[512];
-        int bytes_read = read(client, buf, sizeof(buf) - 1);
-        buf[bytes_read] = '\0';
+        read(client, buf, sizeof(buf));
         
-        char response[2048];
+        pthread_mutex_lock(&stateMutex);
         
-        // GET 요청 파싱 (기존 방식 유지)
-        if (strstr(buf, "GET /?") && !strstr(buf, "GET / ")) {
-            // 명령어 처리
-            char command_response[256];
-            processCommand(buf, command_response);
-            
-            sprintf(response, 
-                "HTTP/1.1 200 OK\r\n"
-                "Content-Type: text/plain\r\n"
-                "Access-Control-Allow-Origin: *\r\n"
-                "\r\n%s", command_response);
+        if (strstr(buf, "gain_plus")) {
+            gain += 10;
+            printf("Gain: %d\n", gain);
         }
-        else {
-            // HTML 페이지 반환
-            char* html = load_html();
-            sprintf(response, 
-                "HTTP/1.1 200 OK\r\n"
-                "Content-Type: text/html\r\n"
-                "\r\n%s", html);
-            free(html);
+        else if (strstr(buf, "gain_minus")) {
+            gain -= 10;
+            printf("Gain: %d\n", gain);
+        }
+        else if (strstr(buf, "walk_start")) {
+            isWalking = true;
+            printf("Walking started\n");
+        }
+        else if (strstr(buf, "walk_stop")) {
+            isWalking = false;
+            xAmplitude = yAmplitude = aAmplitude = 0.0;
+            printf("Walking stopped\n");
+        }
+        else if (strstr(buf, "move_forward")) {
+            xAmplitude = 1.0;
+            printf("Moving forward\n");
+        }
+        else if (strstr(buf, "move_backward")) {
+            xAmplitude = -1.0;
+            printf("Moving backward\n");
+        }
+        else if (strstr(buf, "turn_left")) {
+            aAmplitude = 0.5;
+            printf("Turning left\n");
+        }
+        else if (strstr(buf, "turn_right")) {
+            aAmplitude = -0.5;
+            printf("Turning right\n");
         }
         
-        write(client, response, strlen(response));
+        pthread_mutex_unlock(&stateMutex);
+        
+        char* html = load_html();
+        write(client, html, strlen(html));
+        free(html);
+        
         close(client);
     }
-    
-    close(s);
     return NULL;
 }
 
-// 로봇 제어 루프 스레드
-void* robotControlLoop(void* arg) {
-    while (1) {
-        controlRobot();
-        usleep(50000); // 50ms 주기
-    }
-    return NULL;
+Walk::Walk(): Robot() {
+  mTimeStep = getBasicTimeStep();
+  
+  getLED("HeadLed")->set(0xFF0000);
+  getLED("EyeLed")->set(0x00FF00);
+  mAccelerometer = getAccelerometer("Accelerometer");
+  mAccelerometer->enable(mTimeStep);
+  
+  getGyro("Gyro")->enable(mTimeStep);
+  
+  for (int i=0; i<NMOTORS; i++) {
+    mMotors[i] = getMotor(motorNames[i]);
+    mMotors[i]->enablePosition(mTimeStep);
+  }
+  
+  keyboardEnable(mTimeStep);
+  
+  mMotionManager = new DARwInOPMotionManager(this);
+  mGaitManager = new DARwInOPGaitManager(this, "config.ini");
 }
 
-// 메인 함수 (기존 구조 유지)
-int main() {
-    printf("Starting Robot Web Control System...\n");
+Walk::~Walk() {
+}
+
+void Walk::myStep() {
+  int ret = step(mTimeStep);
+  if (ret == -1)
+    exit(EXIT_SUCCESS);
+}
+
+void Walk::wait(int ms) {
+  double startTime = getTime();
+  double s = (double) ms / 1000.0;
+  while (s + startTime >= getTime())
+    myStep();
+}
+
+void Walk::run() {
+  cout << "-------Walk example of DARwIn-OP-------" << endl;
+  cout << "Web control enabled on port 8080" << endl;
+  
+  // 웹 서버 스레드 시작
+  pthread_t serverThread;
+  pthread_create(&serverThread, NULL, server, NULL);
+  
+  myStep();
+  mMotionManager->playPage(9); // init position
+  wait(200);
+  
+  while (true) {
+    checkIfFallen();
     
-    // 로봇 초기화
-    robotState.isInitialized = initializeRobot();
+    pthread_mutex_lock(&stateMutex);
     
-    // 웹 서버 스레드 시작 (기존과 동일)
-    pthread_t serverThread;
-    pthread_create(&serverThread, NULL, server, NULL);
-    
-    // 로봇 제어 스레드 시작
-    pthread_t robotThread;
-    pthread_create(&robotThread, NULL, robotControlLoop, NULL);
-    
-    // 메인 루프 (기존과 동일)
-    while (1) {
-        printf("Current gain: %d, Walking: %s\n", 
-               robotState.gain, 
-               robotState.isWalking ? "Yes" : "No");
-        sleep(3);
+    // 웹에서 받은 값으로 로봇 제어
+    if (isWalking) {
+      mGaitManager->setXAmplitude(xAmplitude);
+      mGaitManager->setYAmplitude(yAmplitude);
+      mGaitManager->setAAmplitude(aAmplitude);
+      
+      if (!mGaitManager->isRunning()) {
+        mGaitManager->start();
+      }
+    } else {
+      if (mGaitManager->isRunning()) {
+        mGaitManager->stop();
+      }
+      mGaitManager->setXAmplitude(0.0);
+      mGaitManager->setYAmplitude(0.0);
+      mGaitManager->setAAmplitude(0.0);
     }
     
-    return 0;
+    pthread_mutex_unlock(&stateMutex);
+    
+    mGaitManager->step(mTimeStep);
+    myStep(); 
+  }
+}
+
+void Walk::checkIfFallen() {
+  static int fup = 0;
+  static int fdown = 0;
+  static const double acc_tolerance = 80.0;
+  static const double acc_step = 100;
+  
+  const double *acc = mAccelerometer->getValues();
+  if (acc[1] < 512.0 - acc_tolerance)
+    fup++;
+  else
+    fup = 0;
+  
+  if (acc[1] > 512.0 + acc_tolerance)
+    fdown++;
+  else
+    fdown = 0;
+  
+  if (fup > acc_step) {
+    mMotionManager->playPage(10); // f_up
+    mMotionManager->playPage(9); // init position    
+    fup = 0;
+  }
+  else if (fdown > acc_step) {
+    mMotionManager->playPage(11); // b_up
+    mMotionManager->playPage(9); // init position
+    fdown = 0;
+  }
 }
