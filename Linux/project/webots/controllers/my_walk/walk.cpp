@@ -1,3 +1,4 @@
+// 초간단 로봇 웹 제어 (HTML 파일 버전)
 #include <stdio.h>
 #include <string.h>
 #include <pthread.h>
