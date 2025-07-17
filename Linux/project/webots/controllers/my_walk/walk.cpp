@@ -28,6 +28,8 @@ using namespace std;
 // 로봇 상태 전역변수
 int gain = 128;
 bool isWalking = false;
+bool shouldStartWalk = false;
+bool shouldStopWalk = false;
 double xAmplitude = 0.0;
 double yAmplitude = 0.0;
 double aAmplitude = 0.0;
@@ -45,18 +47,41 @@ char* load_html() {
     FILE* f = fopen("walk.html", "r");
     if (!f) {
         static const char html[] = 
-            "HTTP/1.1 200 OK\r\n\r\n"
-            "<html><body>"
-            "<h1>Robot Control</h1>"
-            "<button onclick=\"fetch('/?walk_start')\">Start Walking</button>"
-            "<button onclick=\"fetch('/?walk_stop')\">Stop Walking</button><br><br>"
-            "<button onclick=\"fetch('/?move_forward')\">Forward</button>"
-            "<button onclick=\"fetch('/?move_backward')\">Backward</button><br>"
-            "<button onclick=\"fetch('/?turn_left')\">Turn Left</button>"
-            "<button onclick=\"fetch('/?turn_right')\">Turn Right</button>"
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: text/html\r\n"
+            "Access-Control-Allow-Origin: *\r\n"
+            "Connection: close\r\n\r\n"
+            "<!DOCTYPE html>"
+            "<html><head><title>Robot Control</title></head><body>"
+            "<h1>DARwIn-OP Robot Control</h1>"
+            "<div style='margin: 10px;'>"
+            "<button onclick=\"sendCommand('walk_start')\" style='padding: 10px; margin: 5px; background: green; color: white;'>Start Walking</button>"
+            "<button onclick=\"sendCommand('walk_stop')\" style='padding: 10px; margin: 5px; background: red; color: white;'>Stop Walking</button>"
+            "</div>"
+            "<div style='margin: 10px;'>"
+            "<button onclick=\"sendCommand('move_forward')\" style='padding: 10px; margin: 5px;'>Forward</button>"
+            "<button onclick=\"sendCommand('move_backward')\" style='padding: 10px; margin: 5px;'>Backward</button>"
+            "</div>"
+            "<div style='margin: 10px;'>"
+            "<button onclick=\"sendCommand('turn_left')\" style='padding: 10px; margin: 5px;'>Turn Left</button>"
+            "<button onclick=\"sendCommand('turn_right')\" style='padding: 10px; margin: 5px;'>Turn Right</button>"
+            "</div>"
+            "<div id='status' style='margin: 10px; padding: 10px; background: #f0f0f0;'>Ready</div>"
+            "<script>"
+            "function sendCommand(cmd) {"
+            "  document.getElementById('status').innerText = 'Sending: ' + cmd;"
+            "  fetch('/?command=' + cmd)"
+            "    .then(response => response.text())"
+            "    .then(data => {"
+            "      document.getElementById('status').innerText = 'Command sent: ' + cmd;"
+            "    })"
+            "    .catch(error => {"
+            "      document.getElementById('status').innerText = 'Error: ' + error;"
+            "    });"
+            "}"
+            "</script>"
             "</body></html>";
         
-        // 동적으로 메모리 할당하여 반환
         char* result = (char*)malloc(strlen(html) + 1);
         strcpy(result, html);
         return result;
@@ -65,113 +90,124 @@ char* load_html() {
     fseek(f, 0, SEEK_END);
     long size = ftell(f);
     rewind(f);
-    char* html = (char*)malloc(size + 1);
-    fread(html, 1, size, f);
-    html[size] = '\0';
+    
+    // HTTP 헤더 추가
+    const char* header = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n";
+    char* html = (char*)malloc(strlen(header) + size + 1);
+    strcpy(html, header);
+    
+    fread(html + strlen(header), 1, size, f);
+    html[strlen(header) + size] = '\0';
     fclose(f);
     return html;
 }
 
 void* server(void* arg) {
-    (void)arg; // unused parameter warning 제거
+    (void)arg;
     
-    printf("Server thread starting...\n");  // 디버그 로그 추가
+    printf("Server thread starting...\n");
     
     int s = socket(AF_INET, SOCK_STREAM, 0);
+    if (s < 0) {
+        printf("Socket creation failed!\n");
+        return NULL;
+    }
+    
     struct sockaddr_in addr;
     addr.sin_family = AF_INET;
-    addr.sin_port = htons(8081);  // 8080 → 8081로 변경
-    addr.sin_addr.s_addr = INADDR_ANY;  // 모든 IP에서 접속 허용
+    addr.sin_port = htons(8080);
+    addr.sin_addr.s_addr = INADDR_ANY;
     
     int opt = 1;
     setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
     
     if (bind(s, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
-        printf("Bind failed!\n");
+        printf("Bind failed! Port 8080 might be in use.\n");
+        close(s);
         return NULL;
     }
-    listen(s, 1);
     
-    printf("Server: http://0.0.0.0:8081 (accessible from external)\n");
+    if (listen(s, 5) < 0) {
+        printf("Listen failed!\n");
+        close(s);
+        return NULL;
+    }
+    
+    printf("Server running on http://0.0.0.0:8080\n");
     
     while (1) {
-        printf("Waiting for connection...\n");  // 디버그 로그 추가
-        int client = accept(s, NULL, NULL);
-        printf("Client connected!\n");  // 디버그 로그 추가
+        printf("Waiting for connection...\n");
         
-        char buf[512];
-        ssize_t bytes_read = read(client, buf, sizeof(buf) - 1);
+        struct sockaddr_in client_addr;
+        socklen_t client_len = sizeof(client_addr);
+        int client = accept(s, (struct sockaddr*)&client_addr, &client_len);
+        
+        if (client < 0) {
+            printf("Accept failed!\n");
+            continue;
+        }
+        
+        printf("Client connected from %s\n", inet_ntoa(client_addr.sin_addr));
+        
+        char buf[1024];
+        ssize_t bytes_read = recv(client, buf, sizeof(buf) - 1, 0);
+        
+        if (bytes_read <= 0) {
+            close(client);
+            continue;
+        }
+        
         buf[bytes_read] = '\0';
+        printf("Received request:\n%s\n", buf);
         
-        printf("Received: %s\n", buf);  // 디버그 로그 추가
-        
-        // 요청 파싱 (GET 라인만 추출)
+        // GET 라인 파싱
         char *get_line = strtok(buf, "\r\n");
-        printf("GET line: %s\n", get_line);
+        if (!get_line) {
+            close(client);
+            continue;
+        }
+        
+        printf("Processing: %s\n", get_line);
         
         pthread_mutex_lock(&stateMutex);
         
-        if (strstr(get_line, "walk_start")) {
-            if (!isWalking) {
-                isWalking = true;
-                // mGaitManager->start()는 run() 루프에서 한 번만 호출됨
-                printf("Walking started\n");
-            }
+        if (strstr(get_line, "command=walk_start")) {
+            shouldStartWalk = true;
+            printf("Walk start command received\n");
         }
-        else if (strstr(get_line, "walk_stop")) {
-            if (isWalking) {
-                isWalking = false;
-                xAmplitude = yAmplitude = aAmplitude = 0.0;
-                // mGaitManager->stop()는 run() 루프에서 한 번만 호출됨
-                printf("Walking stopped\n");
-            }
+        else if (strstr(get_line, "command=walk_stop")) {
+            shouldStopWalk = true;
+            printf("Walk stop command received\n");
         }
-        else if (strstr(get_line, "move_forward")) {
-            if (xAmplitude == 1.0) {
-                xAmplitude = 0.0;  // 이미 전진이면 정지
-                printf("Forward stopped\n");
-            } else {
-                xAmplitude = 1.0;  // 아니면 전진
-                printf("Moving forward\n");
-            }
+        else if (strstr(get_line, "command=move_forward")) {
+            xAmplitude = (xAmplitude == 1.0) ? 0.0 : 1.0;
+            printf("Forward command: amplitude = %.1f\n", xAmplitude);
         }
-        else if (strstr(get_line, "move_backward")) {
-            if (xAmplitude == -1.0) {
-                xAmplitude = 0.0;  // 이미 후진이면 정지
-                printf("Backward stopped\n");
-            } else {
-                xAmplitude = -1.0;  // 아니면 후진
-                printf("Moving backward\n");
-            }
+        else if (strstr(get_line, "command=move_backward")) {
+            xAmplitude = (xAmplitude == -1.0) ? 0.0 : -1.0;
+            printf("Backward command: amplitude = %.1f\n", xAmplitude);
         }
-        else if (strstr(get_line, "turn_left")) {
-            if (aAmplitude == 0.5) {
-                aAmplitude = 0.0;  // 이미 좌회전이면 정지
-                printf("Left turn stopped\n");
-            } else {
-                aAmplitude = 0.5;  // 아니면 좌회전
-                printf("Turning left\n");
-            }
+        else if (strstr(get_line, "command=turn_left")) {
+            aAmplitude = (aAmplitude == 0.5) ? 0.0 : 0.5;
+            printf("Left turn command: amplitude = %.1f\n", aAmplitude);
         }
-        else if (strstr(get_line, "turn_right")) {
-            if (aAmplitude == -0.5) {
-                aAmplitude = 0.0;  // 이미 우회전이면 정지
-                printf("Right turn stopped\n");
-            } else {
-                aAmplitude = -0.5;  // 아니면 우회전
-                printf("Turning right\n");
-            }
+        else if (strstr(get_line, "command=turn_right")) {
+            aAmplitude = (aAmplitude == -0.5) ? 0.0 : -0.5;
+            printf("Right turn command: amplitude = %.1f\n", aAmplitude);
         }
         
         pthread_mutex_unlock(&stateMutex);
         
-        char* html = load_html();
-        ssize_t write_result = write(client, html, strlen(html));
-        (void)write_result; // unused variable warning 제거
-        free(html);
+        // HTTP 응답 전송
+        char* response = load_html();
+        send(client, response, strlen(response), 0);
+        free(response);
         
         close(client);
+        printf("Response sent, connection closed\n");
     }
+    
+    close(s);
     return NULL;
 }
 
@@ -216,35 +252,58 @@ void Walk::wait(int ms) {
 
 void Walk::run() {
   cout << "-------Walk example of DARwIn-OP-------" << endl;
-  cout << "Web control enabled on port 8080" << endl;
+  cout << "Web control enabled on http://localhost:8080" << endl;
   
   // 웹 서버 스레드 시작
   pthread_t serverThread;
-  pthread_create(&serverThread, NULL, server, NULL);
+  if (pthread_create(&serverThread, NULL, server, NULL) != 0) {
+    cout << "Failed to create server thread!" << endl;
+    return;
+  }
   
   myStep();
   mMotionManager->playPage(9); // init position
   wait(200);
   
+  bool gaitStarted = false;
+  
   while (true) {
     checkIfFallen();
     
-    // 원본처럼 매 루프마다 초기화
-    mGaitManager->setXAmplitude(0.0);
-    mGaitManager->setYAmplitude(0.0);
-    mGaitManager->setAAmplitude(0.0);
-    
     pthread_mutex_lock(&stateMutex);
     
-    // 웹에서 받은 값으로 로봇 제어 (원본 키보드 방식과 동일)
-    mGaitManager->setXAmplitude(xAmplitude);
-    mGaitManager->setYAmplitude(yAmplitude);
-    mGaitManager->setAAmplitude(aAmplitude);
+    // Walk start/stop 처리
+    if (shouldStartWalk && !isWalking) {
+      cout << "Starting gait manager..." << endl;
+      mGaitManager->start();
+      mGaitManager->step(mTimeStep);
+      isWalking = true;
+      gaitStarted = true;
+      shouldStartWalk = false;
+      cout << "Gait manager started!" << endl;
+    }
+    
+    if (shouldStopWalk && isWalking) {
+      cout << "Stopping gait manager..." << endl;
+      mGaitManager->stop();
+      isWalking = false;
+      gaitStarted = false;
+      shouldStopWalk = false;
+      xAmplitude = yAmplitude = aAmplitude = 0.0;
+      cout << "Gait manager stopped!" << endl;
+    }
+    
+    // Walking이 활성화된 경우에만 amplitude 설정
+    if (isWalking && gaitStarted) {
+      mGaitManager->setXAmplitude(xAmplitude);
+      mGaitManager->setYAmplitude(yAmplitude);
+      mGaitManager->setAAmplitude(aAmplitude);
+      mGaitManager->step(mTimeStep);
+    }
     
     pthread_mutex_unlock(&stateMutex);
     
-    mGaitManager->step(mTimeStep);
-    myStep(); 
+    myStep();
   }
 }
 
