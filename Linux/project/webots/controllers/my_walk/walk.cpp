@@ -1,3 +1,4 @@
+// 필요한 헤더 파일들
 #include <stdio.h>
 #include <string.h>
 #include <pthread.h>
@@ -5,6 +6,7 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <stdlib.h>
+#include <stdbool.h>
 
 #include "Walk.hpp"
 #include <webots/LED.hpp>
@@ -42,12 +44,10 @@ static const char *motorNames[NMOTORS] = {
 char* load_html() {
     FILE* f = fopen("walk.html", "r");
     if (!f) {
-        static char html[] = 
+        static const char html[] = 
             "HTTP/1.1 200 OK\r\n\r\n"
             "<html><body>"
             "<h1>Robot Control</h1>"
-            "<button onclick=\"fetch('/?gain_plus')\">Gain +</button>"
-            "<button onclick=\"fetch('/?gain_minus')\">Gain -</button><br><br>"
             "<button onclick=\"fetch('/?walk_start')\">Start Walking</button>"
             "<button onclick=\"fetch('/?walk_stop')\">Stop Walking</button><br><br>"
             "<button onclick=\"fetch('/?move_forward')\">Forward</button>"
@@ -55,74 +55,119 @@ char* load_html() {
             "<button onclick=\"fetch('/?turn_left')\">Turn Left</button>"
             "<button onclick=\"fetch('/?turn_right')\">Turn Right</button>"
             "</body></html>";
-        return strdup(html);
+        
+        // 동적으로 메모리 할당하여 반환
+        char* result = (char*)malloc(strlen(html) + 1);
+        strcpy(result, html);
+        return result;
     }
     
     fseek(f, 0, SEEK_END);
     long size = ftell(f);
     rewind(f);
-    char* html = malloc(size + 1);
+    char* html = (char*)malloc(size + 1);
     fread(html, 1, size, f);
-    html[size] = 0;
+    html[size] = '\0';
     fclose(f);
     return html;
 }
 
-void* server(void*) {
+void* server(void* arg) {
+    (void)arg; // unused parameter warning 제거
+    
+    printf("Server thread starting...\n");  // 디버그 로그 추가
+    
     int s = socket(AF_INET, SOCK_STREAM, 0);
-    struct sockaddr_in addr = {AF_INET, htons(8080), {INADDR_ANY}};
+    struct sockaddr_in addr;
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(8081);  // 8080 → 8081로 변경
+    addr.sin_addr.s_addr = INADDR_ANY;  // 모든 IP에서 접속 허용
+    
     int opt = 1;
     setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-    bind(s, (struct sockaddr*)&addr, sizeof(addr));
+    
+    if (bind(s, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+        printf("Bind failed!\n");
+        return NULL;
+    }
     listen(s, 1);
     
-    printf("Server: http://localhost:8080\n");
+    printf("Server: http://0.0.0.0:8081 (accessible from external)\n");
     
     while (1) {
+        printf("Waiting for connection...\n");  // 디버그 로그 추가
         int client = accept(s, NULL, NULL);
+        printf("Client connected!\n");  // 디버그 로그 추가
+        
         char buf[512];
-        read(client, buf, sizeof(buf));
+        ssize_t bytes_read = read(client, buf, sizeof(buf) - 1);
+        buf[bytes_read] = '\0';
+        
+        printf("Received: %s\n", buf);  // 디버그 로그 추가
+        
+        // 요청 파싱 (GET 라인만 추출)
+        char *get_line = strtok(buf, "\r\n");
+        printf("GET line: %s\n", get_line);
         
         pthread_mutex_lock(&stateMutex);
         
-        if (strstr(buf, "gain_plus")) {
-            gain += 10;
-            printf("Gain: %d\n", gain);
+        if (strstr(get_line, "walk_start")) {
+            if (!isWalking) {
+                isWalking = true;
+                // mGaitManager->start()는 run() 루프에서 한 번만 호출됨
+                printf("Walking started\n");
+            }
         }
-        else if (strstr(buf, "gain_minus")) {
-            gain -= 10;
-            printf("Gain: %d\n", gain);
+        else if (strstr(get_line, "walk_stop")) {
+            if (isWalking) {
+                isWalking = false;
+                xAmplitude = yAmplitude = aAmplitude = 0.0;
+                // mGaitManager->stop()는 run() 루프에서 한 번만 호출됨
+                printf("Walking stopped\n");
+            }
         }
-        else if (strstr(buf, "walk_start")) {
-            isWalking = true;
-            printf("Walking started\n");
+        else if (strstr(get_line, "move_forward")) {
+            if (xAmplitude == 1.0) {
+                xAmplitude = 0.0;  // 이미 전진이면 정지
+                printf("Forward stopped\n");
+            } else {
+                xAmplitude = 1.0;  // 아니면 전진
+                printf("Moving forward\n");
+            }
         }
-        else if (strstr(buf, "walk_stop")) {
-            isWalking = false;
-            xAmplitude = yAmplitude = aAmplitude = 0.0;
-            printf("Walking stopped\n");
+        else if (strstr(get_line, "move_backward")) {
+            if (xAmplitude == -1.0) {
+                xAmplitude = 0.0;  // 이미 후진이면 정지
+                printf("Backward stopped\n");
+            } else {
+                xAmplitude = -1.0;  // 아니면 후진
+                printf("Moving backward\n");
+            }
         }
-        else if (strstr(buf, "move_forward")) {
-            xAmplitude = 1.0;
-            printf("Moving forward\n");
+        else if (strstr(get_line, "turn_left")) {
+            if (aAmplitude == 0.5) {
+                aAmplitude = 0.0;  // 이미 좌회전이면 정지
+                printf("Left turn stopped\n");
+            } else {
+                aAmplitude = 0.5;  // 아니면 좌회전
+                printf("Turning left\n");
+            }
         }
-        else if (strstr(buf, "move_backward")) {
-            xAmplitude = -1.0;
-            printf("Moving backward\n");
-        }
-        else if (strstr(buf, "turn_left")) {
-            aAmplitude = 0.5;
-            printf("Turning left\n");
-        }
-        else if (strstr(buf, "turn_right")) {
-            aAmplitude = -0.5;
-            printf("Turning right\n");
+        else if (strstr(get_line, "turn_right")) {
+            if (aAmplitude == -0.5) {
+                aAmplitude = 0.0;  // 이미 우회전이면 정지
+                printf("Right turn stopped\n");
+            } else {
+                aAmplitude = -0.5;  // 아니면 우회전
+                printf("Turning right\n");
+            }
         }
         
         pthread_mutex_unlock(&stateMutex);
         
         char* html = load_html();
-        write(client, html, strlen(html));
+        ssize_t write_result = write(client, html, strlen(html));
+        (void)write_result; // unused variable warning 제거
         free(html);
         
         close(client);
@@ -152,6 +197,8 @@ Walk::Walk(): Robot() {
 }
 
 Walk::~Walk() {
+  delete mMotionManager;
+  delete mGaitManager;
 }
 
 void Walk::myStep() {
@@ -182,25 +229,17 @@ void Walk::run() {
   while (true) {
     checkIfFallen();
     
+    // 원본처럼 매 루프마다 초기화
+    mGaitManager->setXAmplitude(0.0);
+    mGaitManager->setYAmplitude(0.0);
+    mGaitManager->setAAmplitude(0.0);
+    
     pthread_mutex_lock(&stateMutex);
     
-    // 웹에서 받은 값으로 로봇 제어
-    if (isWalking) {
-      mGaitManager->setXAmplitude(xAmplitude);
-      mGaitManager->setYAmplitude(yAmplitude);
-      mGaitManager->setAAmplitude(aAmplitude);
-      
-      if (!mGaitManager->isRunning()) {
-        mGaitManager->start();
-      }
-    } else {
-      if (mGaitManager->isRunning()) {
-        mGaitManager->stop();
-      }
-      mGaitManager->setXAmplitude(0.0);
-      mGaitManager->setYAmplitude(0.0);
-      mGaitManager->setAAmplitude(0.0);
-    }
+    // 웹에서 받은 값으로 로봇 제어 (원본 키보드 방식과 동일)
+    mGaitManager->setXAmplitude(xAmplitude);
+    mGaitManager->setYAmplitude(yAmplitude);
+    mGaitManager->setAAmplitude(aAmplitude);
     
     pthread_mutex_unlock(&stateMutex);
     
